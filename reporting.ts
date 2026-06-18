@@ -112,6 +112,8 @@ Seccion Transversal: ${crossSection}
 Dimensiones: ${width} m x ${height} m
 Area: ${results.area} cm2
 Momento de Inercia: ${results.I} cm4
+Eje neutro desde la base: ${results.centroid} mm
+Modulo resistente: ${results.sectionModulus} cm3
 Peso propio: ${results.weight} kN
 Peso propio incluido: ${includeSelfWeight ? 'SI' : 'NO'}
 Factor de carga aplicado: ${loadFactor}
@@ -134,12 +136,11 @@ ${Array.isArray(results.reactions)
 RESULTADOS DEL ANALISIS
 -----------------------
 Cortante Maximo: ${results.maxShear} kN
-Momento Flector Maximo: ${results.maxMoment} kN-m
-Deflexion Maxima: ${results.maxDeflection} mm
-Esfuerzo Normal Maximo: ${results.maxStress} MPa
+Momento Flector Maximo: ${results.maxMoment} kN-m en x=${results.maxMomentLocation} m
+Deflexion Maxima: ${results.maxDeflection} mm en x=${results.maxDeflectionLocation} m
+Esfuerzo Normal Maximo: ${results.maxStress} MPa en x=${results.maxStressLocation} m
 Esfuerzo de Von Mises: ${results.vonMisesStress} MPa
-Esfuerzo Cortante: ${results.shearStress} MPa
-Mcr (LTB): ${results.ltbCriticalMoment} kN-m | FS LTB: ${results.ltbSafetyFactor}
+Esfuerzo Cortante Aproximado: ${results.shearStress} MPa
 
 FACTORES DE SEGURIDAD
 ---------------------
@@ -160,6 +161,14 @@ Limite Recomendado (L/360): ${results.deflectionLimit} mm
 Ratio: ${results.deflectionRatio}
 Estado: ${parseFloat(results.deflectionRatio) <= 1 ? 'CUMPLE' : 'NO CUMPLE'}
 
+VERIFICACION NUMERICA
+---------------------
+Estado: ${results.verification.status}
+Metodo de deflexion: ${results.verification.method}
+Residual de fuerza vertical: ${results.verification.verticalResidual} kN
+Residual de momento: ${results.verification.momentResidual} kN-m
+Residual de deflexion en apoyos: ${results.verification.supportDeflectionResidual} mm
+
 NOTAS ADICIONALES
 -----------------
 ${analysisNotes || 'Sin notas adicionales'}
@@ -168,7 +177,9 @@ SUPUESTOS
 ---------
 - Analisis elasto-lineal, pequena deformacion
 - Factores: carga=${loadFactor}, K=${effectiveLengthFactor}, peso propio=${includeSelfWeight ? 'SI' : 'NO'}
-- Reacciones y esfuerzos basados en modelo de viga
+- Modelo: ${results.modelScope}
+- Los tipos articulado/rodillo representan apoyos verticales simples
+- No incluye empotramientos, plasticidad, segundo orden ni verificacion normativa completa
 
 ================================
 Reporte generado por Simulador de Analisis Estructural

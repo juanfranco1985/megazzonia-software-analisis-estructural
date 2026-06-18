@@ -1,37 +1,11 @@
-import { calculateArea } from './sections';
-import { Load, Support } from './types';
+import { calculateSectionProperties } from './sections';
+import { Load } from './types';
 
-export const calculateMomentOfInertia = (crossSection: string, width: number, height: number) => {
-  if (crossSection === 'rectangular') {
-    return (width * Math.pow(height, 3)) / 12;
-  }
-  if (crossSection === 'circular') {
-    const radius = width / 2;
-    return (Math.PI * Math.pow(radius, 4)) / 4;
-  }
-  if (crossSection === 'I-beam') {
-    const tw = width * 0.4;
-    const tf = height * 0.15;
-    const h = height;
-    const b = width;
-    return (b * Math.pow(h, 3)) / 12 - ((b - tw) * Math.pow(h - 2 * tf, 3)) / 12;
-  }
-  if (crossSection === 'T-beam') {
-    const flangeWidth = width;
-    const flangeThick = height * 0.2;
-    const webWidth = width * 0.3;
-    const webHeight = height * 0.8;
-    const area1 = flangeWidth * flangeThick;
-    const area2 = webWidth * webHeight;
-    const y1 = height - flangeThick / 2;
-    const y2 = webHeight / 2;
-    const yc = (area1 * y1 + area2 * y2) / (area1 + area2);
-    const I1 = (flangeWidth * Math.pow(flangeThick, 3)) / 12 + area1 * Math.pow(y1 - yc, 2);
-    const I2 = (webWidth * Math.pow(webHeight, 3)) / 12 + area2 * Math.pow(y2 - yc, 2);
-    return I1 + I2;
-  }
-  return (width * Math.pow(height, 3)) / 12;
-};
+export const calculateMomentOfInertia = (
+  crossSection: string,
+  width: number,
+  height: number,
+) => calculateSectionProperties(crossSection, width, height).inertia;
 
 export const checkBuckling = (material, I, L, effectiveLength = 1.0, area) => {
   const Le = L * effectiveLength;
@@ -45,6 +19,62 @@ export const checkBuckling = (material, I, L, effectiveLength = 1.0, area) => {
     bucklingRisk: slendernessRatio > 200 ? 'Alto' : slendernessRatio > 100 ? 'Medio' : 'Bajo',
   };
 };
+
+const interpolate = (xValues: number[], values: number[], target: number) => {
+  if (target <= xValues[0]) return values[0];
+  if (target >= xValues[xValues.length - 1]) return values[values.length - 1];
+
+  const rightIndex = xValues.findIndex((x) => x >= target);
+  const leftIndex = Math.max(rightIndex - 1, 0);
+  const x0 = xValues[leftIndex];
+  const x1 = xValues[rightIndex];
+  const ratio = x1 === x0 ? 0 : (target - x0) / (x1 - x0);
+  return values[leftIndex] + ratio * (values[rightIndex] - values[leftIndex]);
+};
+
+const integrateDeflection = (
+  xValues: number[],
+  momentValues: number[],
+  elasticModulus: number,
+  inertia: number,
+  supportA: number,
+  supportB: number,
+) => {
+  const curvature = momentValues.map((moment) => -moment / (elasticModulus * inertia));
+  const rawSlope = new Array(xValues.length).fill(0);
+  const rawDeflection = new Array(xValues.length).fill(0);
+
+  for (let i = 1; i < xValues.length; i++) {
+    const dx = xValues[i] - xValues[i - 1];
+    rawSlope[i] =
+      rawSlope[i - 1] + ((curvature[i - 1] + curvature[i]) * dx) / 2;
+    rawDeflection[i] =
+      rawDeflection[i - 1] + ((rawSlope[i - 1] + rawSlope[i]) * dx) / 2;
+  }
+
+  const rawAtA = interpolate(xValues, rawDeflection, supportA);
+  const rawAtB = interpolate(xValues, rawDeflection, supportB);
+  const integrationConstant = (rawAtA - rawAtB) / (supportB - supportA);
+  const offset = -rawAtA - integrationConstant * supportA;
+  const deflection = rawDeflection.map(
+    (value, index) => value + integrationConstant * xValues[index] + offset,
+  );
+
+  return {
+    values: deflection,
+    supportResidual: Math.max(
+      Math.abs(interpolate(xValues, deflection, supportA)),
+      Math.abs(interpolate(xValues, deflection, supportB)),
+    ),
+  };
+};
+
+const getMaximumByAbsoluteValue = (values: number[]) =>
+  values.reduce(
+    (maximum, value, index) =>
+      Math.abs(value) > Math.abs(maximum.value) ? { value, index } : maximum,
+    { value: values[0] || 0, index: 0 },
+  );
 
 export const analyzeBeam = ({
   beamLength,
@@ -60,28 +90,31 @@ export const analyzeBeam = ({
   effectiveLengthFactor = 1.0,
 }) => {
   const material = materials[beamMaterial];
-  const inertia = calculateMomentOfInertia(crossSection, width, height);
-  const area = calculateArea(crossSection, width, height);
-  const points = 200;
+  const section = calculateSectionProperties(crossSection, width, height);
+  const { inertia, area } = section;
+  const points = 400;
   const dx = beamLength / points;
 
   const supportA = supports && supports[0] ? supports[0].position : 0;
   const supportB = supports && supports[1] ? supports[1].position : beamLength;
-  const span = Math.max(supportB - supportA, 0.0001);
+  const span = supportB - supportA;
 
   let totalVertical = 0;
   let momentAboutA = 0;
 
-  const factoredLoads = loads.map((l) => ({ ...l, magnitude: (l.magnitude || 0) * loadFactor }));
+  const factoredLoads: Load[] = loads.map((load: Load) => ({
+    ...load,
+    magnitude: (load.magnitude || 0) * loadFactor,
+  }));
 
   if (includeSelfWeight) {
-    const w = (material.density * area * 9.81) / 1000; // kN/m
+    const selfWeight = ((material.density * area * 9.81) / 1000) * loadFactor;
     factoredLoads.push({
       id: 'self-weight',
       type: 'distributed',
-      position: supportA,
-      endPosition: supportB,
-      magnitude: w,
+      position: 0,
+      endPosition: beamLength,
+      magnitude: selfWeight,
     });
   }
 
@@ -92,51 +125,45 @@ export const analyzeBeam = ({
     if (load.type === 'point') {
       const force = load.magnitude * 1000 * verticalComponent;
       totalVertical += force;
-      momentAboutA += force * Math.max(load.position - supportA, 0);
+      momentAboutA += force * (load.position - supportA);
     } else if (load.type === 'distributed') {
-      const w = load.magnitude * 1000;
-      const length = load.endPosition - load.position;
-      const totalLoad = w * length;
+      const endPosition = load.endPosition ?? load.position;
+      const intensity = load.magnitude * 1000;
+      const length = endPosition - load.position;
+      const totalLoad = intensity * length;
       const centroid = load.position + length / 2;
       totalVertical += totalLoad;
-      momentAboutA += totalLoad * Math.max(centroid - supportA, 0);
+      momentAboutA += totalLoad * (centroid - supportA);
     } else if (load.type === 'triangular') {
-      const wMax = load.magnitude * 1000;
-      const length = load.endPosition - load.position;
-      const totalLoad = (wMax * length) / 2;
+      const endPosition = load.endPosition ?? load.position;
+      const maximumIntensity = load.magnitude * 1000;
+      const length = endPosition - load.position;
+      const totalLoad = (maximumIntensity * length) / 2;
       const centroid = load.position + (2 * length) / 3;
       totalVertical += totalLoad;
-      momentAboutA += totalLoad * Math.max(centroid - supportA, 0);
+      momentAboutA += totalLoad * (centroid - supportA);
     } else if (load.type === 'moment') {
       momentAboutA += load.magnitude * 1000;
     }
   });
 
-  const R2 = momentAboutA / span;
-  const R1 = totalVertical - R2;
+  const reactionB = momentAboutA / span;
+  const reactionA = totalVertical - reactionB;
+  const xValues = Array.from({ length: points + 1 }, (_, index) => index * dx);
+  const shearValues: number[] = [];
+  const momentValues: number[] = [];
 
-  const shearData = [];
-  const momentData = [];
-  const deflectionData = [];
-  const stressData = [];
-
-  let maxShear = 0;
-  let maxMoment = 0;
-  let maxDeflection = 0;
-  let maxStress = 0;
-
-  for (let i = 0; i <= points; i++) {
-    const x = i * dx;
-    let V = 0;
-    let M = 0;
+  xValues.forEach((x) => {
+    let shear = 0;
+    let moment = 0;
 
     if (x >= supportA) {
-      V += R1;
-      M += R1 * (x - supportA);
+      shear += reactionA;
+      moment += reactionA * (x - supportA);
     }
     if (x >= supportB) {
-      V += R2;
-      M += R2 * (x - supportB);
+      shear += reactionB;
+      moment += reactionB * (x - supportB);
     }
 
     factoredLoads.forEach((load) => {
@@ -145,69 +172,107 @@ export const analyzeBeam = ({
 
       if (load.type === 'point' && x >= load.position) {
         const force = load.magnitude * 1000 * verticalComponent;
-        V -= force;
-        M -= force * (x - load.position);
+        shear -= force;
+        moment -= force * (x - load.position);
       } else if (load.type === 'distributed') {
-        if (x >= load.position && x <= load.endPosition) {
-          const w = load.magnitude * 1000;
-          V -= w * (x - load.position);
-          M -= (w * Math.pow(x - load.position, 2)) / 2;
-        } else if (x > load.endPosition) {
-          const w = load.magnitude * 1000;
-          const length = load.endPosition - load.position;
-          V -= w * length;
-          M -= w * length * (x - (load.position + length / 2));
+        const endPosition = load.endPosition ?? load.position;
+        const intensity = load.magnitude * 1000;
+        if (x >= load.position && x <= endPosition) {
+          shear -= intensity * (x - load.position);
+          moment -= (intensity * Math.pow(x - load.position, 2)) / 2;
+        } else if (x > endPosition) {
+          const length = endPosition - load.position;
+          shear -= intensity * length;
+          moment -= intensity * length * (x - (load.position + length / 2));
         }
       } else if (load.type === 'triangular') {
-        if (x >= load.position && x <= load.endPosition) {
-          const wMax = load.magnitude * 1000;
-          const length = load.endPosition - load.position;
-          V -= (wMax * Math.pow(x - load.position, 2)) / (2 * length);
-          M -= (wMax * Math.pow(x - load.position, 3)) / (6 * length);
-        } else if (x > load.endPosition) {
-          const wMax = load.magnitude * 1000;
-          const length = load.endPosition - load.position;
-          const totalLoad = (wMax * length) / 2;
-          V -= totalLoad;
-          M -= totalLoad * (x - (load.position + (2 * length) / 3));
+        const endPosition = load.endPosition ?? load.position;
+        const maximumIntensity = load.magnitude * 1000;
+        const length = endPosition - load.position;
+        if (x >= load.position && x <= endPosition) {
+          shear -= (maximumIntensity * Math.pow(x - load.position, 2)) / (2 * length);
+          moment -= (maximumIntensity * Math.pow(x - load.position, 3)) / (6 * length);
+        } else if (x > endPosition) {
+          const totalLoad = (maximumIntensity * length) / 2;
+          moment -= totalLoad * (x - (load.position + (2 * length) / 3));
+          shear -= totalLoad;
         }
+      } else if (load.type === 'moment' && x >= load.position) {
+        moment += load.magnitude * 1000;
       }
     });
 
-    const EI = material.E * inertia;
-    const deflection = -((M * Math.pow(x, 2)) / (2 * EI)) * (1 - Math.pow(x / beamLength, 2));
-    const c = height / 2;
-    const stress = Math.abs((M * c) / inertia);
+    shearValues.push(shear);
+    momentValues.push(moment);
+  });
 
-    shearData.push({ x: x.toFixed(3), V: (V / 1000).toFixed(3) });
-    momentData.push({ x: x.toFixed(3), M: (M / 1000).toFixed(3) });
-    deflectionData.push({ x: x.toFixed(3), d: (deflection * 1000).toFixed(4) });
-    stressData.push({ x: x.toFixed(3), stress: (stress / 1e6).toFixed(3) });
+  const deflection = integrateDeflection(
+    xValues,
+    momentValues,
+    material.E,
+    inertia,
+    supportA,
+    supportB,
+  );
+  const stressValues = momentValues.map(
+    (moment) => (Math.abs(moment) * section.cMax) / inertia,
+  );
+  const maxShearResult = getMaximumByAbsoluteValue(shearValues);
+  const maxMomentResult = getMaximumByAbsoluteValue(momentValues);
+  const maxDeflectionResult = getMaximumByAbsoluteValue(deflection.values);
+  const maxStressResult = getMaximumByAbsoluteValue(stressValues);
+  const maxShear = Math.abs(maxShearResult.value);
+  const maxMoment = Math.abs(maxMomentResult.value);
+  const maxDeflection = Math.abs(maxDeflectionResult.value);
+  const maxStress = Math.abs(maxStressResult.value);
 
-    maxShear = Math.max(maxShear, Math.abs(V));
-    maxMoment = Math.max(maxMoment, Math.abs(M));
-    maxDeflection = Math.max(maxDeflection, Math.abs(deflection));
-    maxStress = Math.max(maxStress, stress);
-  }
+  const shearData = xValues.map((x, index) => ({
+    x: Number(x.toFixed(3)),
+    V: Number((shearValues[index] / 1000).toFixed(3)),
+  }));
+  const momentData = xValues.map((x, index) => ({
+    x: Number(x.toFixed(3)),
+    M: Number((momentValues[index] / 1000).toFixed(3)),
+  }));
+  const deflectionData = xValues.map((x, index) => ({
+    x: Number(x.toFixed(3)),
+    d: Number((deflection.values[index] * 1000).toFixed(4)),
+  }));
+  const stressData = xValues.map((x, index) => ({
+    x: Number(x.toFixed(3)),
+    stress: Number((stressValues[index] / 1e6).toFixed(3)),
+  }));
 
-  const c = height / 2;
-  const safetyFactor = maxStress ? material.yieldStrength / maxStress : 0;
-  const ultimateSafetyFactor = maxStress ? material.ultimateStrength / maxStress : 0;
   const weight = beamLength * area * material.density * 9.81;
-  const bucklingAnalysis = checkBuckling(material, inertia, beamLength, effectiveLengthFactor, area);
+  const bucklingAnalysis = checkBuckling(
+    material,
+    inertia,
+    beamLength,
+    effectiveLengthFactor,
+    area,
+  );
   const deflectionLimit = beamLength / 360;
   const deflectionRatio = deflectionLimit ? maxDeflection / deflectionLimit : 0;
-  const shearStress = area ? (maxShear * 1.5) / area : 0;
+  const shearShapeFactor = crossSection === 'circular' ? 4 / 3 : 1.5;
+  const shearStress = area ? (maxShear * shearShapeFactor) / area : 0;
   const vonMisesStress = Math.sqrt(Math.pow(maxStress, 2) + 3 * Math.pow(shearStress, 2));
-  const ltbCriticalMoment = material && material.E
-    ? (Math.pow(Math.PI, 2) * material.E * inertia) / Math.pow(effectiveLengthFactor * span, 2)
+  const safetyFactor = vonMisesStress ? material.yieldStrength / vonMisesStress : 0;
+  const ultimateSafetyFactor = vonMisesStress
+    ? material.ultimateStrength / vonMisesStress
     : 0;
-  const ltbSafetyFactor = maxMoment ? ltbCriticalMoment / maxMoment : 0;
+  const verticalResidual = reactionA + reactionB - totalVertical;
+  const momentResidual = reactionB * span - momentAboutA;
+  const equilibriumTolerance = Math.max(Math.abs(totalVertical), 1) * 1e-9;
+  const momentTolerance = Math.max(Math.abs(momentAboutA), 1) * 1e-9;
+  const verificationPassed =
+    Math.abs(verticalResidual) <= equilibriumTolerance &&
+    Math.abs(momentResidual) <= momentTolerance &&
+    deflection.supportResidual <= 1e-9;
 
   return {
     reactions: {
-      R1: (R1 / 1000).toFixed(2),
-      R2: (R2 / 1000).toFixed(2),
+      R1: (reactionA / 1000).toFixed(2),
+      R2: (reactionB / 1000).toFixed(2),
     },
     appliedLoadFactor: loadFactor.toFixed(2),
     includeSelfWeight,
@@ -216,21 +281,35 @@ export const analyzeBeam = ({
     deflectionData,
     stressData,
     maxShear: (maxShear / 1000).toFixed(2),
+    maxShearLocation: xValues[maxShearResult.index].toFixed(3),
     maxMoment: (maxMoment / 1000).toFixed(2),
+    maxMomentLocation: xValues[maxMomentResult.index].toFixed(3),
     maxDeflection: (maxDeflection * 1000).toFixed(4),
+    maxDeflectionLocation: xValues[maxDeflectionResult.index].toFixed(3),
     maxStress: (maxStress / 1e6).toFixed(2),
+    maxStressLocation: xValues[maxStressResult.index].toFixed(3),
     vonMisesStress: (vonMisesStress / 1e6).toFixed(2),
     shearStress: (shearStress / 1e6).toFixed(2),
     safetyFactor: safetyFactor.toFixed(2),
     ultimateSafetyFactor: ultimateSafetyFactor.toFixed(2),
     I: (inertia * 1e8).toFixed(4),
     area: (area * 1e4).toFixed(2),
+    centroid: (section.centroidFromBottom * 1000).toFixed(2),
+    sectionModulus: (section.sectionModulus * 1e6).toFixed(3),
     weight: (weight / 1000).toFixed(2),
     buckling: bucklingAnalysis,
     deflectionRatio: deflectionRatio.toFixed(3),
     deflectionLimit: (deflectionLimit * 1000).toFixed(2),
-    utilizationRatio: maxStress ? ((maxStress / material.yieldStrength) * 100).toFixed(1) : '0.0',
-    ltbCriticalMoment: (ltbCriticalMoment / 1000).toFixed(2),
-    ltbSafetyFactor: ltbSafetyFactor.toFixed(2),
+    utilizationRatio: vonMisesStress
+      ? ((vonMisesStress / material.yieldStrength) * 100).toFixed(1)
+      : '0.0',
+    verification: {
+      status: verificationPassed ? 'Verificado' : 'Revisar',
+      method: 'Integracion numerica de M/EI',
+      verticalResidual: (verticalResidual / 1000).toExponential(2),
+      momentResidual: (momentResidual / 1000).toExponential(2),
+      supportDeflectionResidual: (deflection.supportResidual * 1000).toExponential(2),
+    },
+    modelScope: 'Viga Euler-Bernoulli con dos apoyos verticales simples',
   };
 };

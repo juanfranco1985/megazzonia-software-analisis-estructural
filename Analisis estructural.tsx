@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Settings, Download, TrendingUp, AlertCircle, Info, Calculator, FileText, Globe, Copy } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Plus, Trash2, Settings, Download, AlertCircle, Info, Calculator, FileText, Globe, Copy, CheckCircle2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area } from 'recharts';
-import { Customized } from 'recharts';
 import { materials, supportTypes, loadTypes, defaultSupports } from './constants';
 import { analyzeBeam } from './calculations';
 import { buildExportData, buildReportText, buildPdfText, downloadJson, downloadText } from './reporting';
@@ -31,6 +30,20 @@ const translations = {
     csv: 'CSV',
     share: 'Copy link',
   },
+};
+
+type PersistedState = {
+  beamLength?: number;
+  beamMaterial?: string;
+  crossSection?: string;
+  width?: number;
+  height?: number;
+  supports?: Support[];
+  loads?: Load[];
+  includeSelfWeight?: boolean;
+  loadFactor?: number;
+  effectiveLengthFactor?: number;
+  analysisNotes?: string;
 };
 
 function HeaderBar({ showReport, toggleReport, handleGenerateReport, handleExport, handleExportPdf, handleExportCsv, handleCopyLink, results, lang, setLang }) {
@@ -122,12 +135,12 @@ function InfoPanel({ showReport, analysisNotes, setAnalysisNotes }) {
       </h3>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
         <div>
-          <div className="text-slate-400 mb-1">Normativa de Referencia</div>
-          <div className="text-white">AISC 360-16, Eurocode 3</div>
+          <div className="text-slate-400 mb-1">Alcance del Modelo</div>
+          <div className="text-white">Viga con dos apoyos verticales simples</div>
         </div>
         <div>
           <div className="text-slate-400 mb-1">Metodo de Analisis</div>
-          <div className="text-white">Teoria de Vigas de Euler-Bernoulli</div>
+          <div className="text-white">Euler-Bernoulli e integracion numerica M/EI</div>
         </div>
         <div>
           <div className="text-slate-400 mb-1">Hipotesis</div>
@@ -141,7 +154,7 @@ function InfoPanel({ showReport, analysisNotes, setAnalysisNotes }) {
           onChange={(e) => setAnalysisNotes(e.target.value)}
           placeholder="Agregue notas, consideraciones especiales, o comentarios sobre el analisis..."
           className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm"
-          rows="2"
+          rows={2}
         />
       </div>
     </div>
@@ -191,7 +204,7 @@ function GeometryCard({
               onChange={(e) => setBeamMaterial(e.target.value)}
               className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-500 focus-visible:outline-offset-2"
             >
-              {Object.entries(materials).map(([key, mat]) => (
+              {Object.entries(materials as Record<string, { name: string }>).map(([key, mat]) => (
                 <option key={key} value={key}>{mat.name}</option>
               ))}
             </select>
@@ -249,7 +262,7 @@ function GeometryCard({
         </div>
         <div className="grid grid-cols-2 gap-2 pt-2">
           <div>
-            <label className="block text-sm text-slate-300 mb-2">Factor de carga (ULS)</label>
+            <label className="block text-sm text-slate-300 mb-2">Factor global de carga</label>
             <input
               type="number"
               value={loadFactor}
@@ -315,7 +328,7 @@ function LoadSystemCard({
         <Plus className="w-4 h-4" />
         Agregar Carga
       </button>
-      <div className="flex gap-2 mb-3">
+      <div className="preset-grid mb-3">
         <button
           onClick={addMidspanPointLoad}
           className="flex-1 text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-500 focus-visible:outline-offset-2"
@@ -335,16 +348,16 @@ function LoadSystemCard({
           Simple
         </button>
         <button
-          onClick={() => applyPreset('cantilever')}
+          onClick={() => applyPreset('uniform')}
           className="flex-1 text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-500 focus-visible:outline-offset-2"
         >
-          Voladizo
+          Uniforme
         </button>
         <button
-          onClick={() => applyPreset('two-span')}
+          onClick={() => applyPreset('mixed')}
           className="flex-1 text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-500 focus-visible:outline-offset-2"
         >
-          2 vanos
+          Mixta
         </button>
       </div>
 
@@ -475,6 +488,14 @@ function LoadSystemCard({
                 <span className="text-white font-mono">{results.I} cm4</span>
               </div>
               <div className="flex justify-between">
+                <span className="text-slate-400">Eje neutro:</span>
+                <span className="text-white font-mono">{results.centroid} mm</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Modulo W:</span>
+                <span className="text-white font-mono">{results.sectionModulus} cm3</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-slate-400">Peso:</span>
                 <span className="text-white font-mono">{results.weight} kN</span>
               </div>
@@ -519,9 +540,9 @@ function LoadSystemCard({
 function SupportsCard({ supports, supportTypes, beamLength, updateSupport }) {
   return (
     <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/70 shadow-lg shadow-slate-900/40">
-      <h2 className="text-lg font-semibold text-white mb-3">Apoyos (dos apoyos)</h2>
+      <h2 className="text-lg font-semibold text-white mb-3">Apoyos simples</h2>
       <div className="text-xs text-slate-400 mb-2">
-        El calculo admite dos apoyos dentro de la luz (x entre 0 y L), posiciones distintas.
+        El solver admite dos reacciones verticales en posiciones distintas, incluso con voladizos exteriores.
       </div>
       <div className="space-y-2">
         {supports.map((support) => (
@@ -614,7 +635,7 @@ function ModelSection({ beamLength, supports, supportTypes, loads }) {
               );
             } else if (load.type === 'distributed') {
               const x2 = 50 + (load.endPosition / beamLength) * 900 * (beamLength / (beamLength + 1));
-              const arrows = [];
+              const arrows: ReactNode[] = [];
               for (let i = x; i <= x2; i += 25) {
                 arrows.push(
                   <line key={`arrow-${i}`} x1={i} y1={100 - scale / 2} x2={i} y2="100" stroke="#f97316" strokeWidth="2" markerEnd="url(#arrowhead2)" />
@@ -629,7 +650,7 @@ function ModelSection({ beamLength, supports, supportTypes, loads }) {
               );
             } else if (load.type === 'triangular') {
               const x2 = 50 + (load.endPosition / beamLength) * 900 * (beamLength / (beamLength + 1));
-              const arrows = [];
+              const arrows: ReactNode[] = [];
               const numArrows = 8;
               for (let i = 0; i <= numArrows; i++) {
                 const xi = x + (x2 - x) * (i / numArrows);
@@ -697,18 +718,15 @@ function ResultsSection({ showResults, results, materials, beamMaterial }) {
           <div className="bg-slate-900/50 rounded-lg p-3">
             <div className="text-xs text-slate-400">Mmax</div>
             <div className="text-xl font-bold text-purple-400">{results.maxMoment} kNm</div>
-          </div>
-          <div className="bg-slate-900/50 rounded-lg p-3">
-            <div className="text-xs text-slate-400">Mcr (LTB)</div>
-            <div className="text-xl font-bold text-indigo-400">{results.ltbCriticalMoment} kNm</div>
-            <div className="text-xs text-slate-500">FS LTB: {results.ltbSafetyFactor}</div>
+            <div className="text-xs text-slate-500">x = {results.maxMomentLocation} m</div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-3">
             <div className="text-xs text-slate-400">sigma max</div>
             <div className="text-xl font-bold text-yellow-400">{results.maxStress} MPa</div>
+            <div className="text-xs text-slate-500">x = {results.maxStressLocation} m</div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-3">
-            <div className="text-xs text-slate-400">tau max</div>
+            <div className="text-xs text-slate-400">tau aprox.</div>
             <div className="text-xl font-bold text-orange-400">{results.shearStress} MPa</div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-3">
@@ -718,6 +736,21 @@ function ResultsSection({ showResults, results, materials, beamMaterial }) {
           <div className="bg-slate-900/50 rounded-lg p-3">
             <div className="text-xs text-slate-400">delta max</div>
             <div className="text-xl font-bold text-cyan-400">{results.maxDeflection} mm</div>
+            <div className="text-xs text-slate-500">x = {results.maxDeflectionLocation} m</div>
+          </div>
+        </div>
+        <div className="mt-4 verification-strip">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-green-400" />
+            <div>
+              <div className="text-sm font-semibold text-white">Verificacion numerica: {results.verification.status}</div>
+              <div className="text-xs text-slate-400">{results.verification.method}</div>
+            </div>
+          </div>
+          <div className="verification-values">
+            <span>Sum Fy: {results.verification.verticalResidual} kN</span>
+            <span>Sum M: {results.verification.momentResidual} kNm</span>
+            <span>delta apoyos: {results.verification.supportDeflectionResidual} mm</span>
           </div>
         </div>
       </div>
@@ -817,7 +850,8 @@ function ResultsSection({ showResults, results, materials, beamMaterial }) {
                 cursor={{ stroke: '#94a3b8', strokeDasharray: '4 4' }}
               />
               <ReferenceLine y={0} stroke="#64748b" strokeWidth={2} />
-              <ReferenceLine y={-parseFloat(results.deflectionLimit)} stroke="#ef4444" strokeDasharray="5 5" label={{ value: 'L/360', fill: '#ef4444', fontSize: 10 }} />
+              <ReferenceLine y={parseFloat(results.deflectionLimit)} stroke="#ef4444" strokeDasharray="5 5" label={{ value: '+L/360', fill: '#ef4444', fontSize: 10 }} />
+              <ReferenceLine y={-parseFloat(results.deflectionLimit)} stroke="#ef4444" strokeDasharray="5 5" label={{ value: '-L/360', fill: '#ef4444', fontSize: 10 }} />
               <Line type="monotone" dataKey="d" stroke="#eab308" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -918,14 +952,14 @@ function ResultsSection({ showResults, results, materials, beamMaterial }) {
           </div>
         </div>
 
-        <div className="mt-4 p-4 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-lg border border-purple-500/30">
+        <div className="mt-4 p-4 recommendation-panel rounded-lg border border-purple-500/30">
           <h3 className="text-sm font-semibold text-white mb-2"> Recomendaciones Profesionales</h3>
           <ul className="text-sm text-slate-300 space-y-2">
             <li className="flex items-start gap-2">
               <span className="text-purple-400 mt-1">-</span>
               <span>
                 <strong>Factor de Seguridad:</strong> FS = {results.safetyFactor} 
-                {parseFloat(results.safetyFactor) >= 2 ? ' (Cumple con codigos de construccion)' : ' (Por debajo de estandares)'}
+                {parseFloat(results.safetyFactor) >= 2 ? ' (Margen elastico orientativo adecuado)' : ' (Margen elastico reducido)'}
               </span>
             </li>
             <li className="flex items-start gap-2">
@@ -957,19 +991,19 @@ function ResultsSection({ showResults, results, materials, beamMaterial }) {
         </div>
 
         <div className="mt-4 p-4 bg-slate-900/50 rounded-lg border border-slate-600">
-          <h3 className="text-sm font-semibold text-white mb-2"> Normativa Aplicable</h3>
+          <h3 className="text-sm font-semibold text-white mb-2"> Alcance y criterios</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-400">
             <div>
-              <strong className="text-slate-300">AISC 360-16:</strong> Specification for Structural Steel Buildings
+              <strong className="text-slate-300">Equilibrio:</strong> residuos de fuerza y momento informados con cada calculo
             </div>
             <div>
-              <strong className="text-slate-300">Eurocode 3:</strong> Design of steel structures
+              <strong className="text-slate-300">Deflexion:</strong> integracion numerica de la curvatura M/EI
             </div>
             <div>
-              <strong className="text-slate-300">ACI 318:</strong> Building Code for Concrete (si aplica)
+              <strong className="text-slate-300">Resistencia:</strong> comparacion elastica orientativa con fluencia
             </div>
             <div>
-              <strong className="text-slate-300">NDS:</strong> National Design Specification for Wood (si aplica)
+              <strong className="text-slate-300">Servicio:</strong> limite configurable de referencia L/360
             </div>
           </div>
           <p className="text-xs text-slate-500 mt-3">
@@ -991,7 +1025,7 @@ export default function BeamAnalyzer() {
   const [loads, setLoads] = useState<Load[]>([]);
   const [nextLoadId, setNextLoadId] = useState(1);
   const [showResults, setShowResults] = useState(false);
-  const [results, setResults] = useState(null);
+  const [results, setResults] = useState<ReturnType<typeof analyzeBeam> | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [analysisNotes, setAnalysisNotes] = useState('');
   const [formError, setFormError] = useState('');
@@ -1002,7 +1036,7 @@ export default function BeamAnalyzer() {
 
   const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
 
-  const addLoad = (preset: Partial<Load> = {}) => {
+  const addLoad = useCallback((preset: Partial<Load> = {}) => {
     const newLoad: Load = {
       id: nextLoadId,
       type: 'point',
@@ -1014,7 +1048,7 @@ export default function BeamAnalyzer() {
     };
     setLoads([...loads, newLoad]);
     setNextLoadId(nextLoadId + 1);
-  };
+  }, [beamLength, loads, nextLoadId]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1026,7 +1060,7 @@ export default function BeamAnalyzer() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [beamLength]);
+  }, [addLoad, beamLength]);
 
   const removeLoad = (id: number | string) => {
     setLoads(loads.filter(l => l.id !== id));
@@ -1035,7 +1069,7 @@ export default function BeamAnalyzer() {
   const updateLoad = (id: number, field: string, value: number | string) => {
     setLoads(loads.map(l => {
       if (l.id !== id) return l;
-      let next = { ...l, [field]: value };
+      const next = { ...l, [field]: value };
       if (field === 'position') {
         next.position = clamp(Number(value) || 0, 0, beamLength);
         if (next.type !== 'point') {
@@ -1061,6 +1095,9 @@ export default function BeamAnalyzer() {
     if (width <= 0 || height <= 0) return 'Las dimensiones de la seccion deben ser mayores que cero.';
     if (supports.length !== 2) return 'El analisis actual asume dos apoyos.';
     const sortedSupports = [...supports].sort((a, b) => a.position - b.position);
+    if (sortedSupports.some((support) => support.type === 'fixed')) {
+      return 'El solver actual no resuelve empotramientos. Use apoyos articulados o de rodillo.';
+    }
     const pos0 = sortedSupports[0]?.position;
     const pos1 = sortedSupports[1]?.position;
     if (pos0 < 0 || pos1 > beamLength || pos0 === pos1) {
@@ -1217,12 +1254,12 @@ export default function BeamAnalyzer() {
     // Load state from URL hash or localStorage
     try {
       const hash = window.location.hash;
-      let saved: any = null;
+      let saved: PersistedState | null = null;
       if (hash.startsWith('#state=')) {
-        saved = JSON.parse(decodeURIComponent(hash.replace('#state=', '')));
+        saved = JSON.parse(decodeURIComponent(hash.replace('#state=', ''))) as PersistedState;
       } else {
         const ls = localStorage.getItem('beam-state');
-        if (ls) saved = JSON.parse(ls);
+        if (ls) saved = JSON.parse(ls) as PersistedState;
       }
       if (saved) {
         setBeamLength(saved.beamLength || 10);
@@ -1230,7 +1267,12 @@ export default function BeamAnalyzer() {
         setCrossSection(saved.crossSection || 'rectangular');
         setWidth(saved.width || 0.1);
         setHeight(saved.height || 0.2);
-        setSupports(saved.supports || defaultSupports);
+        setSupports(
+          (saved.supports || defaultSupports).map((support: Support) => ({
+            ...support,
+            type: support.type === 'fixed' ? 'pinned' : support.type,
+          })),
+        );
         setLoads(saved.loads || []);
         setIncludeSelfWeight(saved.includeSelfWeight ?? true);
         setLoadFactor(saved.loadFactor ?? 1.0);
@@ -1269,7 +1311,8 @@ export default function BeamAnalyzer() {
     }
   }, [hydrated, beamLength, beamMaterial, crossSection, width, height, supports, loads, includeSelfWeight, loadFactor, effectiveLengthFactor, analysisNotes]);
 
-  const applyPreset = (preset: 'simple' | 'cantilever' | 'two-span') => {
+  const applyPreset = (preset: 'simple' | 'uniform' | 'mixed') => {
+    setIncludeSelfWeight(false);
     if (preset === 'simple') {
       setBeamLength(10);
       setSupports([
@@ -1280,17 +1323,17 @@ export default function BeamAnalyzer() {
         { id: 1, type: 'point', position: 5, magnitude: 10, angle: 90 },
       ]);
       setNextLoadId(2);
-    } else if (preset === 'cantilever') {
+    } else if (preset === 'uniform') {
       setBeamLength(6);
       setSupports([
-        { id: 1, type: 'fixed', position: 0 },
+        { id: 1, type: 'pinned', position: 0 },
         { id: 2, type: 'roller', position: 6 },
       ]);
       setLoads([
         { id: 1, type: 'distributed', position: 0, endPosition: 6, magnitude: 3 },
       ]);
       setNextLoadId(2);
-    } else if (preset === 'two-span') {
+    } else if (preset === 'mixed') {
       setBeamLength(12);
       setSupports([
         { id: 1, type: 'pinned', position: 0 },
@@ -1328,7 +1371,7 @@ export default function BeamAnalyzer() {
             </div>
             <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700/70 rounded-lg px-3 py-2 text-sm text-slate-200">
               <span className="inline-flex h-2 w-2 rounded-full bg-indigo-400"></span>
-              <span>K (LTB): <span className="font-semibold text-white">{effectiveLengthFactor}</span></span>
+              <span>K (pandeo): <span className="font-semibold text-white">{effectiveLengthFactor}</span></span>
             </div>
             <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700/70 rounded-lg px-3 py-2 text-sm text-slate-200">
               <span className={`inline-flex h-2 w-2 rounded-full ${includeSelfWeight ? 'bg-emerald-400' : 'bg-red-400'}`}></span>

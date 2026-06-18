@@ -1,9 +1,16 @@
-Planned tests (not implemented yet):
-- Unit tests for `analyzeBeam`, `calculateMomentOfInertia`, and area helpers (Vitest).
-- Validation tests: beam length > 0, supports at 0 and L, load spans inside beam, magnitudes > 0.
-- UI smoke test: render main app with default supports and a sample load, assert results cards display.
+Implemented numerical reference tests:
+- T-section neutral axis and extreme-fiber selection.
+- Simply supported beam with a center point load.
+- Simply supported beam with a full-span uniform load.
+- Concentrated moment in equilibrium and the internal moment diagram.
+- Point load on an exterior overhang with signed lever arms.
 
-Run plan (once tests exist):
+Run:
 1) Install deps: `npm install`
-2) Run dev: `npm run dev`
-3) Run tests (when added): `npm test` (to be wired with Vitest)
+2) Run numerical tests: `npm test`
+3) Run lint: `npm run lint`
+4) Run build: `npm run build`
+
+Pending coverage:
+- Component-level UI smoke tests.
+- Browser automation for export downloads.

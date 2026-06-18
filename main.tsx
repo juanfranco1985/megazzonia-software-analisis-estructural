@@ -4,7 +4,7 @@ import BeamAnalyzer from './Analisis estructural';
 import './styles.css';
 
 const container = document.getElementById('root');
-const root = createRoot(container);
+const root = createRoot(container!);
 root.render(
   <React.StrictMode>
     <BeamAnalyzer />

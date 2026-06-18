@@ -54,7 +54,6 @@ export const materials: Materials = {
 };
 
 export const supportTypes = [
-  { type: 'fixed', name: 'Empotrado', symbol: 'fixed', description: 'Restriccion total de movimiento y rotacion' },
   { type: 'pinned', name: 'Articulado', symbol: 'pinned', description: 'Restriccion de movimiento, libre rotacion' },
   { type: 'roller', name: 'Rodillo', symbol: 'roller', description: 'Restriccion vertical, libre horizontal' },
 ];
@@ -62,11 +61,11 @@ export const supportTypes = [
 export const loadTypes = [
   { type: 'point', name: 'Carga Puntual', unit: 'kN', description: 'Fuerza concentrada en un punto' },
   { type: 'distributed', name: 'Carga Distribuida', unit: 'kN/m', description: 'Carga uniforme a lo largo de una seccion' },
-  { type: 'moment', name: 'Momento', unit: 'kN-m', description: 'Par de torsion aplicado' },
+  { type: 'moment', name: 'Momento', unit: 'kN-m', description: 'Momento flector concentrado' },
   { type: 'triangular', name: 'Carga Triangular', unit: 'kN/m', description: 'Carga variable linealmente' },
 ];
 
-export const defaultSupports = [
-  { id: 1, type: 'fixed', position: 0 },
+export const defaultSupports: Support[] = [
+  { id: 1, type: 'pinned', position: 0 },
   { id: 2, type: 'roller', position: 10 },
 ];

@@ -15,7 +15,6 @@ module.exports = {
     'eslint:recommended',
     'plugin:react-hooks/recommended',
     'plugin:@typescript-eslint/recommended',
-    'plugin:react-refresh/recommended',
     'prettier',
   ],
   rules: {

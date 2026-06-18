@@ -309,6 +309,42 @@ textarea {
   resize: vertical;
 }
 
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.preset-grid button {
+  min-height: 32px;
+  white-space: normal;
+}
+
+.recommendation-panel {
+  background: rgba(15, 38, 27, 0.92);
+}
+
+.verification-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem;
+  border: 1px solid rgba(97, 211, 148, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 48, 31, 0.36);
+}
+
+.verification-values {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem 1rem;
+  color: var(--muted);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.75rem;
+}
+
 .bg-slate-900\/50 svg {
   display: block;
 }
@@ -339,5 +375,12 @@ textarea {
   }
   .grid-cols-2 {
     grid-template-columns: 1fr;
+  }
+  .verification-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .verification-values {
+    justify-content: flex-start;
   }
 }

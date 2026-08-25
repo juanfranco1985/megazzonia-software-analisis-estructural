@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Plus, Trash2, Settings, Download, AlertCircle, Info, Calculator, FileText, Globe, Copy, CheckCircle2 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area } from 'recharts';
 import { materials, supportTypes, loadTypes, defaultSupports } from './constants';
 import { analyzeBeam } from './calculations';
 import { buildExportData, buildReportText, buildPdfText, downloadJson, downloadText } from './reporting';
@@ -697,7 +696,46 @@ function ModelSection({ beamLength, supports, supportTypes, loads }) {
 }
 
 function ResultsSection({ showResults, results, materials, beamMaterial }) {
-  if (!showResults || !results) return null;
+  const [chartLibrary, setChartLibrary] = useState<typeof import('recharts')>();
+
+  useEffect(() => {
+    if (chartLibrary) return undefined;
+    if (!showResults) return undefined;
+    if (!results) return undefined;
+
+    let cancelled = false;
+    void import('recharts').then((module) => {
+      if (!cancelled) setChartLibrary(module);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showResults, results, chartLibrary]);
+
+  if (!showResults) return null;
+  if (!results) return null;
+  if (!chartLibrary) {
+    return (
+      <div className={'bg-slate-800/60 rounded-xl p-6 border border-slate-700/70 text-sm text-slate-300'}>
+        Preparando diagramas interactivos...
+      </div>
+    );
+  }
+
+  const {
+    LineChart,
+    Line,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    ResponsiveContainer,
+    ReferenceLine,
+    AreaChart,
+    Area,
+  } = chartLibrary;
+
   return (
     <>
       <div className="bg-slate-800/60 rounded-xl p-6 border border-slate-700/70 shadow-lg shadow-slate-900/40">
